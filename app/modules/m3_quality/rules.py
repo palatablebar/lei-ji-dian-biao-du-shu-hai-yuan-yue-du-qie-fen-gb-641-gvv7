@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+from ... import config
 from ..m2_contract import contract as contract_mod
 from ..m4_intervals import rollover
 
@@ -75,6 +76,11 @@ def monotonic_quarantine(records: list[dict],
         series.setdefault((record["meter_id"], record["register"]), []).append(record)
     for key in sorted(series):
         meter = contracts[key[0]]
+        # 需量寄存器每月清零，读数是「周期内最高值」而非累计示数，
+        # 清零后自然变小，既不判倒走也不判满量翻转，整序列原样交给 M8。
+        if key[1] not in config.ENERGY_REGISTERS:
+            kept.extend(sorted(series[key], key=lambda item: item["read_at"]))
+            continue
         items = sorted(series[key], key=lambda item: item["read_at"])
         last: dict | None = None
         for item in items:

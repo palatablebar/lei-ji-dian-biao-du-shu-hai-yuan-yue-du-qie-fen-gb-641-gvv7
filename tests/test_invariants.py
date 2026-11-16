@@ -54,3 +54,31 @@ def test_interval_usage_never_negative(store, batch_id):
         assert interval["usage_kwh"] > 0
         assert interval["delta"] > 0
         assert interval["end_at"] > interval["start_at"]
+
+
+def test_demand_charge_closed_to_published_kw(store, batch_id):
+    """需量电费 = 发布月需量 × 需量电价（0.01 元四舍五入），逐行闭合。"""
+    from decimal import ROUND_HALF_UP
+    from app import config
+    for row in store.load_demand(batch_id):
+        expected = (row["published_demand_kw"] * row["demand_price"]).quantize(
+            config.MONEY_QUANT, rounding=ROUND_HALF_UP)
+        assert row["demand_charge_yuan"] == expected
+        # 发布值永远不低于合同容量兜底，也不低于已观测峰值
+        assert row["published_demand_kw"] >= row["floor_kw"]
+        if row["observed_peak_kw"] is not None:
+            assert row["published_demand_kw"] >= row["observed_peak_kw"]
+        # 待追补标记与覆盖状态自洽
+        assert row["needs_follow_up"] == (row["coverage_status"] != "full")
+
+
+def test_demand_idempotent_rerun_keeps_rows(settings, store, batch_id):
+    """同抄表包重跑：需量行数、发布值、电费逐位不变，不新增需量或电费。"""
+    before = {(r["meter_id"], r["month"]): (r["published_demand_kw"],
+                                             r["demand_charge_yuan"])
+              for r in store.load_demand(batch_id)}
+    service.run(settings, store, sample="readings_dirty.csv")
+    after = {(r["meter_id"], r["month"]): (r["published_demand_kw"],
+                                           r["demand_charge_yuan"])
+             for r in store.load_demand(batch_id)}
+    assert after == before

@@ -41,6 +41,13 @@ def export_readings(batch_id: str | None = None,
     return _response(body, filename, "text/csv; charset=utf-8")
 
 
+@router.get("/api/export/demand.csv")
+def export_demand(batch_id: str | None = None,
+                  ctx: Ctx = Depends(get_ctx)) -> Response:
+    body, filename = service.demand_csv(ctx.settings, ctx.store, batch_id)
+    return _response(body, filename, "text/csv; charset=utf-8")
+
+
 @router.get("/api/export/manifest.json")
 def export_manifest(batch_id: str | None = None,
                     ctx: Ctx = Depends(get_ctx)) -> Response:

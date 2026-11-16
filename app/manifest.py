@@ -71,5 +71,10 @@ def build(*, run_id: str, batch_id: str, batch_key_value: str, settings, sample:
             for a in reconcile.get("accounts", [])
         ],
         "all_balanced": reconcile.get("all_balanced"),
+        "demand_rule": (
+            "需量每月清零，抄见值为周期最高功率(kW)，不累加；"
+            "发布月需量 = max(已观测峰值, 合同容量×40%兜底)；"
+            "观察未覆盖清零时点的周期临时发布并登记追补，补齐证据重算，"
+            "旧批次保留可恢复；同输入重跑命中同一批次，不新增需量或电费"),
         "replayable": "同输入重跑返回同一批次号，行数与合计不变",
     }

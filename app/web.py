@@ -22,15 +22,20 @@ NAV = (
     ("/readings", "读数诊断", "readings"),
     ("/intervals", "区间还原", "intervals"),
     ("/months", "月度分摊", "months"),
+    ("/demand", "月需量", "demand"),
     ("/batches", "批次对账", "batches"),
     ("/export", "导出", "export"),
 )
 
 STATUS_LABELS = {
-    "done": "完成", "failed": "失败", "running": "运行中", "partial": "未完成",
+    "done": "完成", "failed": "失败", "running": "运行中",
     "valid": "有效", "estimate": "估抄", "quarantine": "隔离",
     "normal": "常规", "rollover": "满量翻转", "replacement_first": "新表首读",
     "replacement_last": "换表末读", "ok": "就绪", "skipped": "跳过",
+    "full": "完整", "partial": "残缺", "missing": "缺证",
+    "final": "最终发布", "provisional": "临时·待追补",
+    "peak": "已观测峰值", "floor": "合同容量兜底",
+    "floor_no_evidence": "无证据·容量兜底",
 }
 METHOD_LABELS = {
     "normal": "常规", "rollover": "满量翻转",

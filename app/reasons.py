@@ -42,6 +42,12 @@ REASONS: dict[str, dict[str, str]] = {
     "K_UNIT_ASSUMED": {"label": "单位按契约补齐", "level": "info"},
     "K_UNIT_CONVERTED": {"label": "单位已折算", "level": "info"},
     "K_DUPLICATE_IDENTICAL": {"label": "重复行已合并", "level": "info"},
+    "K_DEMAND_FULL": {"label": "需量周期观察覆盖完整", "level": "info"},
+    "K_DEMAND_PARTIAL": {"label": "需量观察未覆盖完整清零周期，按兜底临时发布", "level": "warn"},
+    "K_DEMAND_MISSING": {"label": "周期内无有效需量证据，按合同容量兜底", "level": "warn"},
+    "K_DEMAND_FLOOR": {"label": "已观测峰值低于合同容量兜底，按兜底发布", "level": "info"},
+    "K_DEMAND_PEAK": {"label": "采用已观测周期最高值", "level": "info"},
+    "K_DEMAND_RESET": {"label": "需量月清零，峰值不累加", "level": "info"},
 }
 
 

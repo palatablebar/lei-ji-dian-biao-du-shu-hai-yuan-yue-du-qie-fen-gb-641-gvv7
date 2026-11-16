@@ -27,8 +27,9 @@ def test_rerun_keeps_row_counts(settings, store, batch_id):
     before = store.count_rows(batch_id)
     service.run(settings, store, sample="readings_dirty.csv")
     assert store.count_rows(batch_id) == before
-    assert before == {"meters": 8, "readings": 46, "intervals": 32,
-                      "allocations": 40, "bills": 16, "quarantine": 14}
+    assert before == {"meters": 9, "readings": 46, "intervals": 32,
+                      "allocations": 40, "bills": 16, "quarantine": 14,
+                      "demand_bills": 0}
 
 
 def test_four_accounts_balanced(run_result):

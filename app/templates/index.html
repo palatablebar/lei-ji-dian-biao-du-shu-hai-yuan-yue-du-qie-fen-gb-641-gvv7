@@ -38,6 +38,17 @@
   <div class="kpi"><span class="kpi-label">电费</span><span class="kpi-value mono">{{ totals.bill_amount|yuan }}</span><span class="kpi-unit">元</span></div>
 </section>
 
+{% if totals.demand_meter_months and totals.demand_meter_months != '0' %}
+<section class="kpis" aria-label="月需量" style="margin-top:var(--gap);">
+  <div class="kpi"><span class="kpi-label">需量表计·月</span><span class="kpi-value mono">{{ totals.demand_meter_months }}</span></div>
+  <div class="kpi"><span class="kpi-label">最终发布</span><span class="kpi-value mono">{{ totals.demand_final }}</span></div>
+  <div class="kpi"><span class="kpi-label">待追补周期</span><span class="kpi-value mono">{{ totals.demand_follow_up }}</span></div>
+  <div class="kpi"><span class="kpi-label">发布月需量</span><span class="kpi-value mono">{{ totals.demand_published_kw|dec(3) }}</span><span class="kpi-unit">kW</span></div>
+  <div class="kpi"><span class="kpi-label">需量电费</span><span class="kpi-value mono">{{ totals.demand_charge|yuan }}</span><span class="kpi-unit">元</span></div>
+  <div class="kpi"><a class="link" href="/demand">进入月需量页 →</a></div>
+</section>
+{% endif %}
+
 <section class="panel">
   <div class="panel-head">
     <h2 class="panel-title">阶段卡</h2>

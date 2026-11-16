@@ -44,6 +44,13 @@ def readings_csv(settings, store, batch_id: str | None = None) -> tuple[str, str
     return body, f"readings-{ident}.csv"
 
 
+def demand_csv(settings, store, batch_id: str | None = None) -> tuple[str, str]:
+    _, ident = _context(settings, store, batch_id)
+    body = csv_out.render(evidence.DEMAND_HEADER,
+                          evidence.demand_rows(store.load_demand(ident)))
+    return body, f"demand-{ident}.csv"
+
+
 def manifest_json(settings, store, batch_id: str | None = None) -> tuple[str, str]:
     batch, ident = _context(settings, store, batch_id)
     payload = manifest_out.build(store, batch, store.load_manifest(ident))
@@ -55,6 +62,7 @@ EXPORTS = {
     "intervals": ("区间还原 CSV", intervals_csv, "text/csv; charset=utf-8"),
     "quarantine": ("隔离区 CSV", quarantine_csv, "text/csv; charset=utf-8"),
     "readings": ("读数证据 CSV", readings_csv, "text/csv; charset=utf-8"),
+    "demand": ("月需量 CSV", demand_csv, "text/csv; charset=utf-8"),
     "manifest": ("运行清单 JSON", manifest_json, "application/json; charset=utf-8"),
 }
 
@@ -73,6 +81,8 @@ def page_context(settings, store, batch) -> dict:
          "rows": counts["quarantine"]},
         {"key": "readings", "label": "读数证据 CSV", "href": "/api/export/readings.csv",
          "rows": counts["readings"]},
+        {"key": "demand", "label": "月需量 CSV", "href": "/api/export/demand.csv",
+         "rows": counts["demand_bills"]},
         {"key": "manifest", "label": "运行清单 JSON", "href": "/api/export/manifest.json",
          "rows": 1},
     ]

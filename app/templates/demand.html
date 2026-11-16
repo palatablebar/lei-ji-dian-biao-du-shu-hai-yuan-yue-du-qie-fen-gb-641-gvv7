@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="page-head">
+  <div>
+    <h1 class="page-title">月需量与需量电费</h1>
+    <p class="page-meta mono">
+      {% if batch %}{{ batch.batch_id }} · {{ batch.sample }} · {{ batch.created_at|localdt }}{% else %}未运行{% endif %}
+    </p>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" id="demand-recalc-button" type="button">重算需量</button>
+    <a class="btn btn-ghost" href="/api/export/demand.csv">月需量 CSV</a>
+  </div>
+</section>
+
+<div class="notice" id="notice" role="status" hidden></div>
+
+<section class="panel">
+  <p class="cell-note" style="max-width:none;margin:0;">
+    需量寄存器每月清零，抄见值是<strong>本清零周期内的最高功率（kW）</strong>，不是累计电量，
+    不做区间相减、不跨月累加。发布月需量 = max(已观测周期最高值, 合同容量 × 40% 兜底)；
+    观察未覆盖到清零时点的周期按临时值先赶上账期，并登记「仍需追补」，补齐证据后重算。
+  </p>
+</section>
+
+{% if not demand_rows %}
+<section class="empty"><p class="empty-line">没有需量结果：先跑一次处理，或契约中没有 DEMAND 需量寄存器的表计。</p></section>
+{% else %}
+<section class="kpis" aria-label="需量合计">
+  <div class="kpi"><span class="kpi-label">表计·月</span><span class="kpi-value mono">{{ demand_stats.demand_meter_months }}</span></div>
+  <div class="kpi"><span class="kpi-label">最终发布</span><span class="kpi-value mono">{{ demand_stats.final_count }}</span></div>
+  <div class="kpi"><span class="kpi-label">临时·待追补</span><span class="kpi-value mono">{{ demand_stats.provisional_count }}</span><span class="kpi-unit">残缺 {{ demand_stats.partial_count }} · 缺证 {{ demand_stats.missing_count }}</span></div>
+  <div class="kpi"><span class="kpi-label">发布月需量合计</span><span class="kpi-value mono">{{ demand_stats.published_demand_total|dec(3) }}</span><span class="kpi-unit">kW</span></div>
+  <div class="kpi"><span class="kpi-label">需量电费合计</span><span class="kpi-value mono">{{ demand_stats.demand_charge_total|yuan }}</span><span class="kpi-unit">元</span></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">月需量发布行</h2>
+    <span class="panel-sub mono">每行一只表一个清零周期</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-dense" data-sortable>
+      <thead><tr>
+        <th data-key="month">月份</th>
+        <th data-key="meter_id">表号</th>
+        <th>观察覆盖</th>
+        <th>发布状态</th>
+        <th class="num">证据条数</th>
+        <th class="num">覆盖天数</th>
+        <th class="num">覆盖率</th>
+        <th class="num">合同容量</th>
+        <th class="num">兜底 40%</th>
+        <th class="num">已观测峰值</th>
+        <th class="num">发布月需量</th>
+        <th>采用口径</th>
+        <th class="num">电价 元/kW</th>
+        <th class="num">需量电费 元</th>
+        <th class="num">仍需追补 kW</th>
+      </tr></thead>
+      <tbody>
+        {% for row in demand_rows %}
+        <tr>
+          <td class="mono">{{ row.month }}</td>
+          <td class="mono">{{ row.meter_id }}</td>
+          <td>
+            {% if row.coverage_status == 'full' %}<span class="badge badge-ok">{{ coverage_labels[row.coverage_status] }}</span>
+            {% elif row.coverage_status == 'partial' %}<span class="badge badge-warn">{{ coverage_labels[row.coverage_status] }}</span>
+            {% else %}<span class="badge badge-bad">{{ coverage_labels[row.coverage_status] }}</span>{% endif %}
+          </td>
+          <td>
+            {% if row.publish_status == 'final' %}<span class="badge badge-ok">{{ publish_labels[row.publish_status] }}</span>
+            {% else %}<span class="badge badge-warn">{{ publish_labels[row.publish_status] }}</span>{% endif %}
+          </td>
+          <td class="num mono">{{ row.reading_count }}</td>
+          <td class="num mono">{{ row.covered_days|dec(3) }}<span class="unit">/ {{ row.period_days|dec(0) }} 天</span></td>
+          <td class="num mono">{{ row.coverage_ratio|dec(4) }}</td>
+          <td class="num mono">{{ row.capacity_kw|dec(3) }}</td>
+          <td class="num mono">{{ row.floor_kw|dec(3) }}</td>
+          <td class="num mono">{% if row.observed_peak_kw is not none %}{{ row.observed_peak_kw|dec(3) }}{% else %}—{% endif %}</td>
+          <td class="num mono strong">{{ row.published_demand_kw|dec(3) }}</td>
+          <td><span class="chip{% if row.basis != 'peak' %} chip-warn{% endif %}">{{ row.basis|status }}</span></td>
+          <td class="num mono">{{ row.demand_price|yuan }}</td>
+          <td class="num mono strong">{{ row.demand_charge_yuan|yuan }}</td>
+          <td class="num mono">
+            {% if row.needs_follow_up %}<span class="badge badge-warn">{{ row.follow_up_kw|dec(3) }}</span>
+            {% else %}<span class="badge badge-ok">0.000</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">待追补周期与取证</h2>
+    <span class="panel-sub mono">{{ demand_stats.follow_up_count }} 个周期仍需证据补齐</span>
+  </div>
+  {% set follow = demand_rows|selectattr('needs_follow_up')|list %}
+  {% if not follow %}
+  <p class="empty-line">本批次所有需量周期都观察到清零时点，无追补项。</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="table table-dense">
+      <thead><tr><th>月份</th><th>表号</th><th>覆盖情形</th><th>首条证据 UTC</th><th>末条证据 UTC</th>
+        <th class="num">已观测峰值 kW</th><th class="num">临时发布 kW</th><th>峰值来源行号</th><th>追补说明</th></tr></thead>
+      <tbody>
+        {% for row in follow %}
+        <tr>
+          <td class="mono">{{ row.month }}</td>
+          <td class="mono">{{ row.meter_id }}</td>
+          <td>{% if row.coverage_status == 'missing' %}<span class="badge badge-bad">缺证（整月无有效读数）</span>
+            {% else %}<span class="badge badge-warn">残缺（末条读数 {{ row.last_read_at|localdt }} 早于清零）</span>{% endif %}</td>
+          <td class="mono">{{ row.first_read_at|localdt if row.first_read_at else '—' }}</td>
+          <td class="mono">{{ row.last_read_at|localdt if row.last_read_at else '—' }}</td>
+          <td class="num mono">{% if row.observed_peak_kw is not none %}{{ row.observed_peak_kw|dec(3) }}{% else %}—{% endif %}</td>
+          <td class="num mono strong">{{ row.published_demand_kw|dec(3) }}</td>
+          <td class="mono">{{ row.peak_linenos|join(';') if row.peak_linenos else '—' }}</td>
+          <td class="cell-note">
+            {% if row.coverage_status == 'missing' %}无任何需量证据，按合同容量 40% 兜底入账；补齐该月抄表包后重跑，按真实峰值重算并保留旧批次可恢复。
+            {% else %}清零前 {{ (row.period_days - row.covered_days)|dec(2) }} 天无观察，可能存在高于 {{ row.published_demand_kw|dec(3) }} kW 的尖峰；补抄后重跑追补差额。{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/app.js" type="module"></script>
+<script src="/static/table.js" type="module"></script>
+<script src="/static/demand.js" type="module"></script>
+{% endblock %}

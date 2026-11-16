@@ -48,10 +48,12 @@ def params_json(batch: dict) -> dict:
 
 
 def counters(*, valid: int, estimate: int, quarantine: int, blank: int,
-             intervals: int, allocations: int, bills: int) -> dict:
+             intervals: int, allocations: int, bills: int,
+             demand_rows: int = 0, demand_follow_up: int = 0) -> dict:
     return {"valid": valid, "estimate": estimate, "quarantine": quarantine,
             "blank": blank, "intervals": intervals, "allocations": allocations,
-            "bills": bills}
+            "bills": bills, "demand_rows": demand_rows,
+            "demand_follow_up": demand_follow_up}
 
 
 def make_run_id() -> str:

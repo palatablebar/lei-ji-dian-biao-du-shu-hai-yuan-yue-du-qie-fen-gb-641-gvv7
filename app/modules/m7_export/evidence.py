@@ -14,6 +14,13 @@ READING_HEADER = ["原始行号", "分段", "表号", "寄存器", "抄表时间
                   "单位", "折合读数", "类型", "状态", "原因码"]
 QUARANTINE_HEADER = ["原始行号", "分段", "原因码", "原因", "等级", "字段", "原始值",
                      "表号", "说明"]
+# 月需量导出：把观察覆盖、采用的最高值、兜底与仍需追补部分逐列摊开，
+# 与需量页同源，逐位一致；需量是 kW，电费是 元/kW·月，不与电度 kWh 混算。
+DEMAND_HEADER = ["月份", "表号", "周期起UTC", "周期止UTC", "观察覆盖", "发布状态",
+                 "需量证据条数", "已观察覆盖天数", "周期天数", "覆盖率",
+                 "合同容量kW", "兜底需量kW", "已观测峰值kW", "峰值取证时间UTC",
+                 "峰值来源行号", "发布月需量kW", "采用口径", "需量电价元/kW",
+                 "需量电费元", "仍需追补kW", "追补标记", "原因码"]
 
 
 def monthly_rows(allocations: list[dict], bills: list[dict],
@@ -91,3 +98,36 @@ def _method_label(method: str) -> str:
     return {"normal": "常规", "rollover": "满量翻转",
             "replacement_first": "新表首读", "replacement_last": "换表末读"}.get(
                 method, method)
+
+
+COVERAGE_TEXT = {"full": "完整", "partial": "残缺", "missing": "缺证"}
+PUBLISH_TEXT = {"final": "最终发布", "provisional": "临时发布·待追补"}
+BASIS_TEXT = {"peak": "已观测峰值", "floor": "合同容量兜底",
+              "floor_no_evidence": "无证据·容量兜底"}
+
+
+def demand_rows(rows: list[dict]) -> list[list[str]]:
+    """月需量证据行：覆盖、峰值、兜底、发布值、追补各占一列，可独立复核。"""
+    out = []
+    for item in rows:
+        out.append([
+            item["month"], item["meter_id"], item["period_start"], item["period_end"],
+            COVERAGE_TEXT.get(item["coverage_status"], item["coverage_status"]),
+            PUBLISH_TEXT.get(item["publish_status"], item["publish_status"]),
+            str(item["reading_count"]),
+            f"{item['covered_days']:.3f}", f"{item['period_days']:.3f}",
+            f"{Decimal(str(item['coverage_ratio'])):.4f}",
+            f"{item['capacity_kw']:.3f}", f"{item['floor_kw']:.3f}",
+            "" if item.get("observed_peak_kw") is None
+            else f"{Decimal(str(item['observed_peak_kw'])):.3f}",
+            item.get("observed_at") or "",
+            ";".join(str(n) for n in item.get("peak_linenos", [])),
+            f"{item['published_demand_kw']:.3f}",
+            BASIS_TEXT.get(item["basis"], item["basis"]),
+            f"{item['demand_price']:.2f}",
+            f"{item['demand_charge_yuan']:.2f}",
+            f"{item['follow_up_kw']:.3f}",
+            "待追补" if item["needs_follow_up"] else "已闭合",
+            f"{item['coverage_flag']} {item['basis_flag']}".strip(),
+        ])
+    return out

@@ -46,6 +46,10 @@ def build_intervals(valid: list[dict], estimates: list[dict],
     intervals: list[dict] = []
     for key in sorted(series):
         meter_id, register = key
+        # 需量不是累计量：每月清零，抄见值是周期最高值，不能逐对相减当电量。
+        # 区间还原只处理电度寄存器，需量序列留给 M8 单独取月最高值。
+        if register not in config.ENERGY_REGISTERS:
+            continue
         meter = contracts[meter_id]
         predecessor = predecessors.get(meter_id)
         items = sorted(series[key], key=lambda item: item["read_at"])

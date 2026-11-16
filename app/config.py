@@ -18,20 +18,32 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CHINA_TZ = dt.timezone(dt.timedelta(hours=8), "Asia/Shanghai")
 UTC = dt.timezone.utc
 
-RULE_VERSION = "meterback/1.0.0"
+RULE_VERSION = "meterback/1.1.0"
 
 USAGE_QUANT = Decimal("0.001")
 MONEY_QUANT = Decimal("0.01")
+# 需量刻度 kW：月需量按 0.001 kW 保存，与用量刻度对齐
+DEMAND_QUANT = Decimal("0.001")
 # 满量翻转判定：上一条读数需达到满量的这个比例，否则按倒走隔离
 ROLLOVER_MIN_RATIO = Decimal("0.9")
+# 缺证周期兜底：月需量不得低于合同容量的这个比例（两部制需量计费通行下限 40%）
+DEMAND_FLOOR_RATIO = Decimal("0.4")
+# 观察覆盖判定宽限：最后一条需量读数距下月清零点不超过该天数，视为观察覆盖全周期
+DEMAND_GRACE_DAYS = Decimal("3")
 
-REGISTERS = ("TOTAL", "PEAK", "FLAT", "VALLEY")
-REGISTER_LABELS = {"TOTAL": "总", "PEAK": "峰", "FLAT": "平", "VALLEY": "谷"}
+REGISTERS = ("TOTAL", "PEAK", "FLAT", "VALLEY", "DEMAND")
+REGISTER_LABELS = {"TOTAL": "总", "PEAK": "峰", "FLAT": "平", "VALLEY": "谷",
+                   "DEMAND": "需"}
 TOU_REGISTERS = ("PEAK", "FLAT", "VALLEY")
+# 需量寄存器是「自上次清零的周期最高值」，不累加、不做区间还原，单独走 M8 月需量
+ENERGY_REGISTERS = ("TOTAL", "PEAK", "FLAT", "VALLEY")
 
 # 单位 → kWh 换算系数（读数先归一到契约单位，用量再折 kWh）
+# kW 是需量（功率）单位，不参与电量累加；与 kWh 按 1:1 归一只是为了让
+# 需量读数复用同一套单位校验与倍率折算，语义在 M8 单独处理。
 UNIT_TO_KWH = {
     "kwh": Decimal("1"), "度": Decimal("1"), "千瓦时": Decimal("1"),
+    "kw": Decimal("1"), "千瓦": Decimal("1"),
     "mwh": Decimal("1000"), "兆瓦时": Decimal("1000"),
 }
 
@@ -46,7 +58,8 @@ READ_TYPE_ALIASES = {
     "e": "E", "估抄": "E", "估算": "E",
 }
 
-STAGES = ("ingest", "contract", "quality", "restore", "allocate", "reconcile", "export")
+STAGES = ("ingest", "contract", "quality", "restore", "allocate", "reconcile",
+          "demand", "export")
 STAGE_LABELS = {
     "ingest": "采信",
     "contract": "契约",
@@ -54,9 +67,10 @@ STAGE_LABELS = {
     "restore": "还原",
     "allocate": "切分",
     "reconcile": "对账",
+    "demand": "需量",
     "export": "导出",
 }
-STAGE_FLOW = "采信 → 契约 → 质量 → 还原 → 切分 → 对账 → 导出"
+STAGE_FLOW = "采信 → 契约 → 质量 → 还原 → 切分 → 对账 → 需量 → 导出"
 
 # 列契约：规范列名 → 可接受的别名（GBK 导出的表头是中文）
 COLUMN_ALIASES = {
@@ -80,6 +94,7 @@ SAMPLES = {
     "readings_header_only.csv": "仅表头",
     "readings_blank.csv": "全空行",
     "readings_bad_header.csv": "表头缺列",
+    "readings_demand.csv": "需量样例 · 完整/残缺/缺证周期",
 }
 DEFAULT_SAMPLE = "readings_dirty.csv"
 METERS_FILE = "meters.csv"
@@ -87,7 +102,9 @@ PRICES_FILE = "prices.csv"
 
 # 单一制电价兜底（prices.csv 缺失时）
 DEFAULT_PRICES = {"TOTAL": Decimal("0.65"), "PEAK": Decimal("1.05"),
-                  "FLAT": Decimal("0.65"), "VALLEY": Decimal("0.32")}
+                  "FLAT": Decimal("0.65"), "VALLEY": Decimal("0.32"),
+                  # 需量电价单位是 元/kW·月，与电度电价（元/kWh）分列，不参与电度账单
+                  "DEMAND": Decimal("39.00")}
 
 
 @dataclass(frozen=True)

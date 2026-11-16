@@ -74,6 +74,21 @@ CREATE TABLE IF NOT EXISTS totals (
 CREATE TABLE IF NOT EXISTS manifests (
     batch_id TEXT PRIMARY KEY, json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS demand_bills (
+    batch_id TEXT NOT NULL, meter_id TEXT NOT NULL, month TEXT NOT NULL,
+    period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+    coverage_status TEXT NOT NULL, publish_status TEXT NOT NULL,
+    reading_count INTEGER NOT NULL, covered_days TEXT NOT NULL,
+    period_days TEXT NOT NULL, coverage_ratio TEXT NOT NULL,
+    capacity_kw TEXT NOT NULL, floor_kw TEXT NOT NULL,
+    observed_peak_kw TEXT, observed_at TEXT, peak_linenos_json TEXT NOT NULL DEFAULT '[]',
+    first_read_at TEXT, last_read_at TEXT,
+    published_demand_kw TEXT NOT NULL, basis TEXT NOT NULL,
+    basis_flag TEXT NOT NULL, coverage_flag TEXT NOT NULL,
+    demand_price TEXT NOT NULL, demand_charge_yuan TEXT NOT NULL,
+    follow_up_kw TEXT NOT NULL, needs_follow_up INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_demand_batch ON demand_bills(batch_id);
 """
 
 
@@ -179,11 +194,11 @@ class Store:
     def save_run(self, *, batch: dict, meters: list[dict], readings: list[dict],
                  intervals: list[dict], allocations: list[dict], bills: list[dict],
                  quarantine: list[dict], stages: list[dict], totals: dict,
-                 manifest_json: dict) -> None:
+                 manifest_json: dict, demand_rows: list[dict] | None = None) -> None:
         b = batch["batch_id"]
         with self.connect() as conn:
             for table in ("meters", "readings", "intervals", "allocations", "bills",
-                          "quarantine", "stages", "totals"):
+                          "quarantine", "stages", "totals", "demand_bills"):
                 conn.execute(f"DELETE FROM {table} WHERE batch_id=?", (b,))
             for m in meters:
                 conn.execute(
@@ -249,6 +264,28 @@ class Store:
             for key, value in totals.items():
                 conn.execute("INSERT INTO totals (batch_id,key,value) VALUES (?,?,?)",
                              (b, key, str(value)))
+            for d in (demand_rows or []):
+                conn.execute(
+                    """INSERT INTO demand_bills (batch_id,meter_id,month,period_start,
+                        period_end,coverage_status,publish_status,reading_count,
+                        covered_days,period_days,coverage_ratio,capacity_kw,floor_kw,
+                        observed_peak_kw,observed_at,peak_linenos_json,first_read_at,
+                        last_read_at,published_demand_kw,basis,basis_flag,coverage_flag,
+                        demand_price,demand_charge_yuan,follow_up_kw,needs_follow_up)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (b, d["meter_id"], d["month"], d["period_start"], d["period_end"],
+                     d["coverage_status"], d["publish_status"], d["reading_count"],
+                     str(d["covered_days"]), str(d["period_days"]),
+                     str(d["coverage_ratio"]), str(d["capacity_kw"]), str(d["floor_kw"]),
+                     None if d.get("observed_peak_kw") is None
+                     else str(d["observed_peak_kw"]),
+                     d.get("observed_at"),
+                     json.dumps(d.get("peak_linenos", []), ensure_ascii=False),
+                     d.get("first_read_at"), d.get("last_read_at"),
+                     str(d["published_demand_kw"]), d["basis"], d["basis_flag"],
+                     d["coverage_flag"], str(d["demand_price"]),
+                     str(d["demand_charge_yuan"]), str(d["follow_up_kw"]),
+                     1 if d.get("needs_follow_up") else 0))
             conn.execute(
                 "INSERT INTO manifests (batch_id,json) VALUES (?,?) "
                 "ON CONFLICT(batch_id) DO UPDATE SET json=excluded.json",
@@ -341,8 +378,23 @@ class Store:
                                (batch_id,)).fetchone()
         return json.loads(row["json"]) if row else None
 
+    def load_demand(self, batch_id: str) -> list[dict]:
+        rows = self._all(
+            "SELECT * FROM demand_bills WHERE batch_id=? "
+            "ORDER BY meter_id, month", (batch_id,))
+        for r in rows:
+            r["peak_linenos"] = json.loads(r.pop("peak_linenos_json") or "[]")
+            for key in ("covered_days", "period_days", "coverage_ratio", "capacity_kw",
+                        "floor_kw", "published_demand_kw", "demand_price",
+                        "demand_charge_yuan", "follow_up_kw"):
+                r[key] = _dec(r[key])
+            r["observed_peak_kw"] = _dec(r["observed_peak_kw"])
+            r["needs_follow_up"] = bool(r["needs_follow_up"])
+        return rows
+
     def count_rows(self, batch_id: str) -> dict:
-        tables = ("meters", "readings", "intervals", "allocations", "bills", "quarantine")
+        tables = ("meters", "readings", "intervals", "allocations", "bills",
+                  "quarantine", "demand_bills")
         with self.connect() as conn:
             return {t: conn.execute(
                 f"SELECT COUNT(*) AS n FROM {t} WHERE batch_id=?", (batch_id,)

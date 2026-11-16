@@ -7,7 +7,9 @@ from decimal import Decimal
 import pytest
 
 from app import errors
+from app.main import create_app
 from app.modules.m7_export import service
+from fastapi.testclient import TestClient
 
 
 def test_monthly_csv_starts_with_bom_and_crlf(client_with_run):
@@ -64,6 +66,30 @@ def test_export_missing_batch_returns_404(client):
     response = client.get("/api/export/monthly.csv")
     assert response.status_code == 404
     assert response.json()["error"] == "E_BATCH_NOT_FOUND"
+
+
+def test_demand_csv_only_for_demand_batch(tmp_path):
+    """月需量导出：覆盖/峰值/兜底/发布/追补各列齐全，缺证周期峰值留空。"""
+    from app import config as cfg
+
+    settings = cfg.Settings(db_path=str(tmp_path / "d.sqlite"),
+                            sample_dir=str(cfg.PROJECT_ROOT / "sample_data"))
+    local = TestClient(create_app(settings))
+    local.post("/api/runs", json={"sample": "readings_demand.csv"})
+    body = local.get("/api/export/demand.csv").text
+    assert body.startswith("﻿")
+    lines = body.splitlines()
+    assert lines[0].lstrip("﻿").startswith("月份,表号,周期起UTC")
+    missing = next(line for line in lines if line.startswith("2026-03,M0009"))
+    cells = missing.split(",")
+    header = lines[0].lstrip("﻿").split(",")
+    idx = {name: i for i, name in enumerate(header)}
+    assert cells[idx["观察覆盖"]] == "缺证"
+    assert cells[idx["已观测峰值kW"]] == ""
+    assert cells[idx["发布月需量kW"]] == "320.000"
+    assert cells[idx["仍需追补kW"]] == "320.000"
+    assert cells[idx["追补标记"]] == "待追补"
+    assert local.get("/api/export/demand.csv").status_code == 200
 
 
 def test_context_requires_existing_batch(store):

@@ -1,7 +1,7 @@
 # 深度登记 meterback（累计电表读数还原与月度切分）
 
-- 规模：中型（7 个功能模块 / 6 个应用页 / 77 条测试）
-- 核心规则：**区间还原 + 按日权重月度切分**。读数按 `(表号, 寄存器, UTC 时间)` 排序后逐对还原：区间用量 =（本次 − 上次）× 综合倍率，满量容量翻转时补容量，换表处拆成「旧表末段 + 新表首读起算」两段，估抄行不作锚点但给区间打标记；区间用量按覆盖天数切到自然月（`[月初, 下月初)` 半开），余数用最大余额法分到 0.001 kWh，同月「总表 = 峰 + 平 + 谷」的残差并入最大分量。
+- 规模：中型（8 个功能模块 / 7 个应用页 / 92 条测试）
+- 核心规则：**区间还原 + 按日权重月度切分**，外加一条独立的**月需量**账。读数按 `(表号, 寄存器, UTC 时间)` 排序后逐对还原：区间用量 =（本次 − 上次）× 综合倍率，满量容量翻转时补容量，换表处拆成「旧表末段 + 新表首读起算」两段，估抄行不作锚点但给区间打标记；区间用量按覆盖天数切到自然月（`[月初, 下月初)` 半开），余数用最大余额法分到 0.001 kWh，同月「总表 = 峰 + 平 + 谷」的残差并入最大分量。需量寄存器每月清零、抄见即周期峰值，M8 只取月内最高值并在合同容量兜底与已观测峰值之间形成可发布月需量。
 - 使用者与工作流：临江供电所抄表班 4 人、辖区 8 只示例表（实际 320 只），月度线损与电费原先靠 Excel 手拉；现在一次处理得到「区间用量 + 月度分摊 + 电费」，每个数字都能追回原始行号与原因码。
 
 ## 功能模块
@@ -14,7 +14,8 @@
 | M4 区间还原 | 重算区间，看翻转、换表、估抄标记 | POST /api/intervals/rebuild、页面 /intervals | `app/modules/m4_intervals/restore.py` `app/modules/m4_intervals/rollover.py` `app/modules/m4_intervals/swaps.py` | `tests/test_m4_intervals.py` |
 | M5 月度切分 | 重算分摊与账单，看每月合计与尾差 | POST /api/months/allocate、页面 /months | `app/modules/m5_months/allocate.py` `app/modules/m5_months/weights.py` `app/modules/m5_months/tou.py` | `tests/test_m5_months.py` |
 | M6 批次与对账 | 跑全流程、查批次历史、看四账、失败重试 | POST /api/runs、GET /api/batches、GET /api/reconcile、页面 / 与 /batches | `app/modules/m6_batches/service.py` `app/modules/m6_batches/compare.py` `app/modules/m6_batches/history.py` `app/modules/m6_batches/resume.py` | `tests/test_m6_batches.py` |
-| M7 导出 | 导出月度分摊、区间、隔离、读数证据、运行清单 | GET /api/export/monthly.csv、GET /api/export/manifest.json、页面 /export | `app/modules/m7_export/evidence.py` `app/modules/m7_export/csv_out.py` `app/modules/m7_export/manifest_out.py` | `tests/test_m7_export.py` |
+| M7 导出 | 导出月度分摊、区间、隔离、读数证据、月需量、运行清单 | GET /api/export/monthly.csv、GET /api/export/demand.csv、GET /api/export/manifest.json、页面 /export | `app/modules/m7_export/evidence.py` `app/modules/m7_export/csv_out.py` `app/modules/m7_export/manifest_out.py` | `tests/test_m7_export.py` |
+| M8 月需量 | 看清零周期最高值、观察覆盖三态、容量兜底、临时发布与追补、重算 | POST /api/demand/recalc、GET /api/demand、页面 /demand | `app/modules/m8_demand/cycle.py` `app/modules/m8_demand/publish.py` `app/modules/m8_demand/service.py` | `tests/test_m8_demand.py` |
 
 端到端：`tests/test_e2e.py`（脏样例 → 六页 200 → 四账 → 导出，含 4xx 失败输入与幂等重跑）。
 不变量：`tests/test_invariants.py`（区间账 = 月度账、幂等重跑行数不变、月桶划分、账单闭合、读数分区）。
@@ -38,6 +39,9 @@
 | TRAP-18 | 0 字节文件、只有表头、数据行全是空行 | 三种都返回「成功导入 0 行」，或直接除零 | 三个文件级原因码分开返回，不落半批数据 | `app/modules/m1_ingest/service.py` | `tests/test_m1_ingest.py::test_empty_states_return_distinct_codes` |
 | TRAP-23 | 区间止点与下一段起点都算一次 | 相邻区间重复计入一天，月度用量偏高 | 区间与月桶都声明左闭右开 `[起, 止)`，相邻段首尾相接 | `app/modules/m5_months/weights.py`、`app/modules/m4_intervals/restore.py` | `tests/test_m5_months.py::test_month_slices_are_half_open`、`tests/test_m4_intervals.py::test_intervals_are_half_open_and_contiguous` |
 | TRAP-24 | 各月/各分量各自四舍五入后合计不等 | 分完差 0.001~0.02，账永远差几分 | 最大余额法分月；分量残差并入最大分量；账单先合计再舍入，分项补差 | `app/modules/m5_months/weights.py`、`app/modules/m5_months/tou.py` | `tests/test_m5_months.py::test_largest_remainder_keeps_total_exact`、`tests/test_m5_months.py::test_tou_components_closed_to_total` |
+| TRAP-25 | 把需量抄见当累计电量逐对相减、跨月累加 | 清零后读数变小被误判倒走而隔离，或把月度峰值加成天文数字 | DEMAND 不进 M3 单调判定、不进 M4 区间；按月清零周期归组只取 max，倍率折 kW，峰值保留来源行号 | `app/modules/m3_quality/rules.py`、`app/modules/m4_intervals/restore.py`、`app/modules/m8_demand/cycle.py` | `tests/test_m8_demand.py::test_peak_is_max_never_summed`、`tests/test_m8_demand.py::test_reset_does_not_quarantine_or_build_intervals` |
+| TRAP-26 | 等清零时点才出账会错过账期，残缺周期直接发布又低估尖峰 | 要么迟缴，要么按未观察全的峰值少收需量电费 | 发布月需量 = max(已观测峰值, 合同容量×40% 兜底)；残缺/缺证周期临时发布赶上账期并登记追补，完整周期才最终发布 | `app/modules/m8_demand/publish.py` | `tests/test_m8_demand.py::test_published_demand_takes_max_of_peak_and_floor`、`tests/test_m8_demand.py::test_partial_cycle_is_provisional_even_when_peak_wins` |
+| TRAP-27 | 重跑同一抄表包重复入账，或发布中断留下半批需量 | 需量与电费翻倍，或旧值被半截数据覆盖 | 批次键含输入摘要+规则版本，重跑命中同批次不新增行；发布在单事务先删后插，中断整体回滚，旧批次保留可恢复 | `app/store.py`、`app/modules/m6_batches/resume.py` | `tests/test_m8_demand.py::test_rerun_same_package_adds_no_demand_rows_or_charge`、`tests/test_m8_demand.py::test_interrupted_publish_keeps_old_batch_recoverable` |
 
 ## 对账规则
 
@@ -54,8 +58,9 @@
 
 ## 已知不覆盖
 
-- 只支持单表计的单向有功读数；双向表（正/反向分别累计）、需量寄存器、无功寄存器一律按 `Q_BAD_REGISTER` 隔离。
-- 电价固定读 `sample_data/prices.csv`（峰 1.05 / 平 0.65 / 谷 0.32 元每 kWh），没有分时日历、阶梯电价与容量电费。
+- 只支持单表计的单向有功读数；双向表（正/反向分别累计）、无功寄存器一律按 `Q_BAD_REGISTER` 隔离。需量寄存器（DEMAND）由 M8 单独处理，不参与电度区间还原。
+- 电度电价固定读 `sample_data/prices.csv`（峰 1.05 / 平 0.65 / 谷 0.32 元每 kWh），没有分时日历、阶梯电价与容量电费；需量电价 `DEMAND`（元/kW·月）同样取该文件，兜底比例 40% 与清零宽限 3 天是 `app/config.py` 常量。
+- 需量追补只登记口径与待追补周期，不自动生成补收账单：补齐证据重跑后在新批次体现差额，旧批次保留可恢复；系统不做两次账单之间的自动冲红。
 - 换表链只支持一段（旧表 → 新表）；链式多次换表能识别但只在最后一段起算，中间段会缺口。
 - 时区按固定 +08:00 处理，不引入 DST；跨时区台区不支持。
 - 并行抄表同一时刻多条读数只按「取值是否一致」判定冲突，没有设备侧时钟偏移校正。

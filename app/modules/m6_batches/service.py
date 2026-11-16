@@ -17,11 +17,34 @@ from ..m2_contract import service as m2_service
 from ..m3_quality import service as m3_service
 from ..m4_intervals import restore as restore_mod
 from ..m5_months import allocate as allocate_mod
+from ..m8_demand import service as demand_service
 from . import compare, history, resume
 
 
 def _ms(start: float) -> int:
     return max(1, int((time.perf_counter() - start) * 1000))
+
+
+def _demand_inputs(valid: list[dict], estimate: list[dict],
+                   contracts) -> list[dict]:
+    """从采信后的读数里抽出需量序列，带上契约倍率（估抄需量同样不进区间，
+    但作为已观测证据参与取最高值，并保留行号供追补核对）。"""
+    multipliers = {meter_id: contract.multiplier
+                   for meter_id, contract in contracts.items()}
+    rows = []
+    for item in (valid + estimate):
+        if item["register"] != "DEMAND":
+            continue
+        rows.append({
+            "lineno": item["lineno"], "meter_id": item["meter_id"],
+            "read_at": item["read_at"], "reading": item["reading"],
+            "multiplier": multipliers.get(item["meter_id"], Decimal("1")),
+        })
+    return rows
+
+
+def _count_demand_readings(valid: list[dict], estimate: list[dict]) -> int:
+    return sum(1 for item in (valid + estimate) if item["register"] == "DEMAND")
 
 
 def run(settings, store, *, sample: str | None = None, mode: str = "full") -> dict:
@@ -139,11 +162,30 @@ def run(settings, store, *, sample: str | None = None, mode: str = "full") -> di
                    "elapsed_ms": _ms(mark),
                    "note": "四账平衡" if reconcile["all_balanced"] else "四账不平"})
 
+    # ---- M8 月需量（独立于电度账：取清零周期最高值，不累加） ----
+    mark = time.perf_counter()
+    demand = demand_service.analyze(
+        contracts=contracts,
+        demand_readings=_demand_inputs(quality["valid"], quality["estimate"],
+                                       contracts),
+        prices=prices)
+    demand_rows = demand["rows"]
+    demand_stats = demand["stats"]
+    stages.append({
+        "stage": "demand", "in_count": _count_demand_readings(
+            quality["valid"], quality["estimate"]),
+        "out_count": len(demand_rows),
+        "quarantine_count": demand_stats["provisional_count"], "status": "ok",
+        "elapsed_ms": _ms(mark),
+        "note": (f"{demand_stats['final_count']} 最终 · "
+                 f"{demand_stats['provisional_count']} 待追补 · "
+                 f"{demand_stats['demand_charge_total']} 元")})
+
     # ---- M7 导出（文件由 GET 接口按需生成） ----
     mark = time.perf_counter()
     stages.append({"stage": "export", "in_count": len(allocated["allocations"]),
-                   "out_count": 4, "quarantine_count": 0, "status": "ok",
-                   "elapsed_ms": _ms(mark), "note": "4 个导出文件"})
+                   "out_count": 5, "quarantine_count": 0, "status": "ok",
+                   "elapsed_ms": _ms(mark), "note": "5 个导出文件"})
 
     finished_at = history.iso(history.now_utc())
     elapsed_ms = _ms(t0)
@@ -166,6 +208,12 @@ def run(settings, store, *, sample: str | None = None, mode: str = "full") -> di
         "encoding": ingested.encoding,
         "balanced": "是" if reconcile["all_balanced"] else "否",
         "reconcile_json": json.dumps(reconcile, ensure_ascii=False, default=str),
+        "demand_meter_months": demand_stats["demand_meter_months"],
+        "demand_final": demand_stats["final_count"],
+        "demand_provisional": demand_stats["provisional_count"],
+        "demand_follow_up": demand_stats["follow_up_count"],
+        "demand_charge": demand_stats["demand_charge_total"],
+        "demand_published_kw": demand_stats["published_demand_total"],
     }
     manifest_json = manifest.build(
         run_id=batch["run_id"], batch_id=batch_id, batch_key_value=key,
@@ -184,7 +232,9 @@ def run(settings, store, *, sample: str | None = None, mode: str = "full") -> di
             valid=len(quality["valid"]), estimate=len(quality["estimate"]),
             quarantine=len(quarantine), blank=ingested.blank_lines,
             intervals=len(intervals), allocations=len(allocated["allocations"]),
-            bills=len(allocated["bills"])),
+            bills=len(allocated["bills"]),
+            demand_rows=len(demand_rows),
+            demand_follow_up=demand_stats["follow_up_count"]),
         reconcile=reconcile)
 
     readings_rows = [{
@@ -213,7 +263,8 @@ def run(settings, store, *, sample: str | None = None, mode: str = "full") -> di
         quarantine=quarantine,
         stages=stages,
         totals=totals,
-        manifest_json=manifest_json)
+        manifest_json=manifest_json,
+        demand_rows=demand_rows)
 
     batch.update(status="done", finished_at=finished_at)
     return {

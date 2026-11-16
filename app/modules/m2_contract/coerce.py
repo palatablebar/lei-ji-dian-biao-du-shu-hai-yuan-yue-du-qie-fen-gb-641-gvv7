@@ -16,9 +16,11 @@ REGISTER_ALIASES = {
     "peak": "PEAK", "峰": "PEAK", "尖峰": "PEAK",
     "flat": "FLAT", "平": "FLAT", "平段": "FLAT",
     "valley": "VALLEY", "谷": "VALLEY", "低谷": "VALLEY",
+    "demand": "DEMAND", "需": "DEMAND", "需量": "DEMAND",
+    "最大需量": "DEMAND", "最大需": "DEMAND",
 }
 
-UNIT_SUFFIXES = ("kwh", "mwh", "度", "千瓦时", "兆瓦时")
+UNIT_SUFFIXES = ("kwh", "mwh", "kw", "度", "千瓦时", "千瓦", "兆瓦时")
 
 
 class CoerceError(ValueError):
